@@ -1,0 +1,5 @@
+[extend]
+
+[allowlist]
+description = "NestJS 模板 README 的 CircleCI 徽章示例 token，非真实密钥"
+paths = ["README.md"]
