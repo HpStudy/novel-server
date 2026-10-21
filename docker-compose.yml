@@ -1,4 +1,34 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/hpstudy/novel-server:latest
+    container_name: novel-app
+    restart: unless-stopped
+    ports:
+      - "8080:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-change-me}
+      DB_DATABASE: ${DB_DATABASE:-novel_platform}
+      DB_SYNCHRONIZE: "false"
+      DB_LOGGING: "false"
+      JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-secret}
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app-network
+
   mysql:
     image: mysql:8.0
     restart: unless-stopped
@@ -15,6 +45,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
   novel_mysql_data:
+
+networks:
+  app-network:
+    driver: bridge
