@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novel-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novel-server
+  template:
+    metadata:
+      labels:
+        app: novel-server
+    spec:
+      containers:
+        - name: novel-server
+          image: hepengs/novel-server:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USERNAME
+              value: "root"
+            - name: DB_PASSWORD
+              value: "change-me"
+            - name: DB_DATABASE
+              value: "novel_platform"
+            - name: DB_SYNCHRONIZE
+              value: "true"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: JWT_SECRET
+              value: "k8s-jwt-secret-change-me"
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: uploads
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novel-server
+spec:
+  type: NodePort
+  selector:
+    app: novel-server
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30081
