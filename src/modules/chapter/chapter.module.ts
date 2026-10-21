@@ -6,9 +6,10 @@ import { Order } from '../../entities/order.entity';
 import { User } from '../../entities/user.entity';
 import { ChapterController } from './chapter.controller';
 import { ChapterService } from './chapter.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Chapter, Book, Order, User])],
+  imports: [AuthModule, TypeOrmModule.forFeature([Chapter, Book, Order, User])],
   controllers: [ChapterController],
   providers: [ChapterService],
   exports: [ChapterService],

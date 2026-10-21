@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Favorite } from '../../entities/favorite.entity';
@@ -11,12 +11,16 @@ export class FavoriteService {
   ) {}
 
   async addFavorite(userId: number, bookId: number) {
-    const exists = await this.favoriteRepository.findOne({ where: { userId, bookId } });
+    const exists = await this.favoriteRepository.findOne({
+      where: { userId, bookId },
+    });
     if (exists) {
       return exists;
     }
 
-    return this.favoriteRepository.save(this.favoriteRepository.create({ userId, bookId }));
+    return this.favoriteRepository.save(
+      this.favoriteRepository.create({ userId, bookId }),
+    );
   }
 
   async cancelFavorite(userId: number, bookId: number) {
@@ -25,11 +29,16 @@ export class FavoriteService {
   }
 
   async list(userId: number) {
-    return this.favoriteRepository.find({ where: { userId }, order: { createdAt: 'DESC' } });
+    return this.favoriteRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   async check(userId: number, bookId: number) {
-    const item = await this.favoriteRepository.findOne({ where: { userId, bookId } });
+    const item = await this.favoriteRepository.findOne({
+      where: { userId, bookId },
+    });
     return { isFavorite: !!item };
   }
 }

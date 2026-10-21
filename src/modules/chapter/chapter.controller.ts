@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ChapterService } from './chapter.service';
 
 @Controller('api/chapter')
@@ -13,8 +13,12 @@ export class ChapterController {
   }
 
   @Get('content/:id')
+  @UseGuards(OptionalJwtAuthGuard)
   async content(@Param('id') id: string, @Req() req: Request & { user?: any }) {
-    const result = await this.chapterService.findContentById(Number(id), req.user);
+    const result = await this.chapterService.findContentById(
+      Number(id),
+      req.user,
+    );
     return result.chapter;
   }
 }

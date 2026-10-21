@@ -28,7 +28,6 @@ import {
 import { Type } from 'class-transformer';
 import { Banner } from '../../entities/banner.entity';
 import { Book } from '../../entities/book.entity';
-import { Category } from '../../entities/category.entity';
 import { Chapter } from '../../entities/chapter.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -533,12 +532,7 @@ export class AdminController {
     return this.adminService.createBook(this.toBookInput(body));
   }
 
-  @Put([
-    'books/:id',
-    'book/:id',
-    'books/update/:id',
-    'book/update/:id',
-  ])
+  @Put(['books/:id', 'book/:id', 'books/update/:id', 'book/update/:id'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   updateBook(
@@ -548,12 +542,7 @@ export class AdminController {
     return this.adminService.updateBook(id, this.toBookInput(body));
   }
 
-  @Delete([
-    'books/:id',
-    'book/:id',
-    'books/delete/:id',
-    'book/delete/:id',
-  ])
+  @Delete(['books/:id', 'book/:id', 'books/delete/:id', 'book/delete/:id'])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   deleteBook(@Param('id', ParseIntPipe) id: number) {
@@ -703,19 +692,18 @@ export class AdminController {
   ): Partial<Banner> {
     return {
       ...body,
-      startAt:
-        body.startAt == null ? body.startAt : new Date(body.startAt),
+      startAt: body.startAt == null ? body.startAt : new Date(body.startAt),
       endAt: body.endAt == null ? body.endAt : new Date(body.endAt),
     };
   }
 
-  private toBookInput(
-    body: CreateBookDto | UpdateBookDto,
-  ): Partial<Book> {
+  private toBookInput(body: CreateBookDto | UpdateBookDto): Partial<Book> {
     return {
       ...body,
       publishedAt:
-        body.publishedAt == null ? body.publishedAt : new Date(body.publishedAt),
+        body.publishedAt == null
+          ? body.publishedAt
+          : new Date(body.publishedAt),
     };
   }
 
@@ -725,7 +713,9 @@ export class AdminController {
     return {
       ...body,
       publishedAt:
-        body.publishedAt == null ? body.publishedAt : new Date(body.publishedAt),
+        body.publishedAt == null
+          ? body.publishedAt
+          : new Date(body.publishedAt),
     };
   }
 }
