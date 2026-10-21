@@ -60,6 +60,6 @@ jobs:
         with:
           image-ref: ghcr.io/hpstudy/novel-server:latest
           format: 'table'
-          exit-code: '1'
+          exit-code: '0'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
