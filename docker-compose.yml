@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/hpstudy/novel-server:latest
+    image: hepengs/novel-server:latest
     container_name: novel-app
     restart: unless-stopped
     ports:

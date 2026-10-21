@@ -18,7 +18,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'cd /home/deploy/novel-server && git pull origin main && docker compose pull && docker compose up -d && docker image prune -f'
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo '${{ secrets.DOCKERHUB_TOKEN }}' | docker login -u '${{ secrets.DOCKERHUB_USERNAME }}' --password-stdin && cd /home/deploy/novel-server && git pull origin main && docker compose pull && docker compose up -d && docker image prune -f"
 
       - name: 健康检查
         run: sleep 10 && curl -s -o /dev/null http://${{ secrets.SSH_HOST }}:8080 || exit 1
