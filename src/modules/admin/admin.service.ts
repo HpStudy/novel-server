@@ -15,6 +15,7 @@ import { Chapter } from '../../entities/chapter.entity';
 import { Comment } from '../../entities/comment.entity';
 import { AdminSetting } from '../../entities/admin-setting.entity';
 import { JwtService } from '@nestjs/jwt';
+import { RedisService } from '../../common/redis.service';
 
 @Injectable()
 export class AdminService {
@@ -36,6 +37,7 @@ export class AdminService {
     @InjectRepository(AdminSetting)
     private readonly settingRepository: Repository<AdminSetting>,
     private readonly jwtService: JwtService,
+    private readonly redis: RedisService,
   ) {}
 
   async login(phone: string, password: string) {
@@ -43,7 +45,9 @@ export class AdminService {
       throw new UnauthorizedException('管理员账号或密码错误');
     }
 
-    const adminUser = await this.userRepository.findOne({ where: { phone: 'admin' } });
+    let adminUser = await this.userRepository.findOne({
+      where: { phone: 'admin' },
+    });
     if (!adminUser) {
       const created = this.userRepository.create({
         phone: 'admin',
@@ -51,10 +55,17 @@ export class AdminService {
         role: 1,
         status: 1,
       });
-      await this.userRepository.save(created);
+      adminUser = await this.userRepository.save(created);
+    } else if (adminUser.role !== 1) {
+      adminUser.role = 1;
+      adminUser = await this.userRepository.save(adminUser);
     }
 
-    const token = this.jwtService.sign({ sub: 1, nickname: '管理员', role: 'admin' });
+    const token = this.jwtService.sign({
+      sub: adminUser.id,
+      nickname: adminUser.nickname,
+      role: 'admin',
+    });
     return { accessToken: token };
   }
 
@@ -81,7 +92,10 @@ export class AdminService {
   }
 
   async orders() {
-    return this.orderRepository.find({ order: { createdAt: 'DESC' }, take: 50 });
+    return this.orderRepository.find({
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
   }
 
   async comments() {
@@ -90,8 +104,12 @@ export class AdminService {
       this.userRepository.find({ select: { id: true, nickname: true } }),
       this.bookRepository.find({ select: { id: true, title: true } }),
     ]);
-    const userNames = new Map(users.map((user) => [String(user.id), user.nickname]));
-    const bookTitles = new Map(books.map((book) => [String(book.id), book.title]));
+    const userNames = new Map(
+      users.map((user) => [String(user.id), user.nickname]),
+    );
+    const bookTitles = new Map(
+      books.map((book) => [String(book.id), book.title]),
+    );
 
     return comments.map((comment) => ({
       id: comment.id,
@@ -115,7 +133,9 @@ export class AdminService {
 
   async settings() {
     const records = await this.settingRepository.find();
-    const settings = Object.fromEntries(records.map((item) => [item.settingKey, item.settingValue]));
+    const settings = Object.fromEntries(
+      records.map((item) => [item.settingKey, item.settingValue]),
+    );
     return {
       siteName: settings.siteName ?? '小说阅读平台',
       contact: settings.contact ?? '400-888-8888',
@@ -150,7 +170,16 @@ export class AdminService {
       const day = String(date.getDate()).padStart(2, '0');
       return `${date.getFullYear()}-${month}-${day}`;
     };
-    const [users, books, orders, categories, todayOrders, revenueResult, trendRows, categoryRows] = await Promise.all([
+    const [
+      users,
+      books,
+      orders,
+      categories,
+      todayOrders,
+      revenueResult,
+      trendRows,
+      categoryRows,
+    ] = await Promise.all([
       this.userRepository.count(),
       this.bookRepository.count(),
       this.orderRepository.count(),
@@ -180,7 +209,9 @@ export class AdminService {
         .getRawMany<{ name: string; value: string }>(),
     ]);
 
-    const orderCounts = new Map(trendRows.map((row) => [row.day, Number(row.count)]));
+    const orderCounts = new Map(
+      trendRows.map((row) => [row.day, Number(row.count)]),
+    );
     const orderTrend = Array.from({ length: 7 }, (_, index) => {
       const date = new Date(trendStart);
       date.setDate(trendStart.getDate() + index);
@@ -246,7 +277,11 @@ export class AdminService {
 
   async createBook(input: Partial<Book>) {
     await this.ensureCategoryExists(input.categoryId);
-    return this.bookRepository.save(this.bookRepository.create(input));
+    const book = await this.bookRepository.save(
+      this.bookRepository.create(input),
+    );
+    await this.clearBookCaches();
+    return book;
   }
 
   async updateBook(id: number, input: Partial<Book>) {
@@ -256,7 +291,9 @@ export class AdminService {
     }
 
     this.bookRepository.merge(book, input);
-    return this.bookRepository.save(book);
+    const updated = await this.bookRepository.save(book);
+    await this.clearBookCaches();
+    return updated;
   }
 
   async deleteBook(id: number) {
@@ -264,6 +301,7 @@ export class AdminService {
     if (!result.affected) {
       throw new NotFoundException('书籍不存在');
     }
+    await this.clearBookCaches();
     return { deleted: true };
   }
 
@@ -291,6 +329,7 @@ export class AdminService {
       this.chapterRepository.create(input),
     );
     await this.refreshBookChapterStats(book.id);
+    await this.clearBookCaches(book.id);
     return chapter;
   }
 
@@ -309,18 +348,23 @@ export class AdminService {
       throw new NotFoundException('所属书籍不存在');
     }
 
-    const savedChapters = await this.chapterRepository.manager.transaction(async (manager) => {
-      const repository = manager.getRepository(Chapter);
-      return repository.save(
-        chapters.map((chapter) => repository.create({
-          ...chapter,
-          bookId,
-          isFree,
-          wordCount: chapter.wordCount ?? 0,
-        })),
-      );
-    });
+    const savedChapters = await this.chapterRepository.manager.transaction(
+      async (manager) => {
+        const repository = manager.getRepository(Chapter);
+        return repository.save(
+          chapters.map((chapter) =>
+            repository.create({
+              ...chapter,
+              bookId,
+              isFree,
+              wordCount: chapter.wordCount ?? 0,
+            }),
+          ),
+        );
+      },
+    );
     await this.refreshBookChapterStats(bookId);
+    await this.clearBookCaches(bookId);
     return savedChapters;
   }
 
@@ -339,6 +383,7 @@ export class AdminService {
     if (bookId !== oldBookId) {
       await this.refreshBookChapterStats(bookId);
     }
+    await this.clearBookCaches(oldBookId, bookId);
     return savedChapter;
   }
 
@@ -346,6 +391,7 @@ export class AdminService {
     const chapter = await this.chapter(id);
     await this.chapterRepository.delete(id);
     await this.refreshBookChapterStats(chapter.bookId);
+    await this.clearBookCaches(chapter.bookId);
     return { deleted: true };
   }
 
@@ -410,5 +456,14 @@ export class AdminService {
       chapterCount,
       wordCount: Number(result?.wordCount ?? 0),
     });
+  }
+
+  private async clearBookCaches(...bookIds: number[]) {
+    await Promise.all([
+      this.redis.deleteByPrefix('cache:books:'),
+      ...bookIds.map((bookId) =>
+        this.redis.delete(`cache:chapters:list:${bookId}`),
+      ),
+    ]);
   }
 }

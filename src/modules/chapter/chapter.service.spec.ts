@@ -20,11 +20,16 @@ describe('ChapterService', () => {
   const userRepository = {
     findOne: jest.fn(),
   } as unknown as Repository<User>;
+  const redis = {
+    get: jest.fn(),
+    set: jest.fn(),
+  };
   const service = new ChapterService(
     chapterRepository,
     bookRepository,
     orderRepository,
     userRepository,
+    redis as never,
   );
 
   beforeEach(() => {

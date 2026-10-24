@@ -19,6 +19,25 @@ services:
       DB_SYNCHRONIZE: "false"
       DB_LOGGING: "false"
       JWT_SECRET: ${JWT_SECRET:-replace-with-a-long-random-secret}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      VECTOR_DB_HOST: ${VECTOR_DB_HOST:-postgres}
+      VECTOR_DB_PORT: ${VECTOR_DB_PORT:-5432}
+      VECTOR_DB_USER: ${VECTOR_DB_USER:-postgres}
+      VECTOR_DB_PASSWORD: ${VECTOR_DB_PASSWORD:-change-me}
+      VECTOR_DB_NAME: ${VECTOR_DB_NAME:-novel_vectors}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_TIMEOUT_MS: ${EMBEDDING_TIMEOUT_MS:-10000}
+      SENSITIVE_WORDS: ${SENSITIVE_WORDS:-}
+      AI_API_BASE: ${AI_API_BASE:-}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com/v1}
+      DOUBAO_API_BASE: ${DOUBAO_API_BASE:-https://ark.cn-beijing.volces.com/api/v3}
+      ZHIPU_API_BASE: ${ZHIPU_API_BASE:-https://open.bigmodel.cn/api/paas/v4}
     volumes:
       - ./uploads:/app/uploads
     depends_on:
@@ -26,6 +45,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
 
@@ -51,11 +72,34 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - app-network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${VECTOR_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD:-change-me}
+      POSTGRES_DB: ${VECTOR_DB_NAME:-novel_vectors}
+    ports:
+      - "${VECTOR_DB_PORT:-5432}:5432"
+    volumes:
+      - novel_vectors_data:/var/lib/postgresql/data
+      - ./database/migrations/20261023_create_ai_vectors.sql:/docker-entrypoint-initdb.d/001-ai-vectors.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${VECTOR_DB_USER:-postgres} -d ${VECTOR_DB_NAME:-novel_vectors}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     networks:
       - app-network
 
 volumes:
   novel_mysql_data:
+  novel_vectors_data:
 
 networks:
   app-network:

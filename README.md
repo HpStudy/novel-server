@@ -33,12 +33,19 @@ npm install
 cp .env.example .env
 ```
 
-Set the MySQL connection values in `.env`. Create the database and ten tables by
-running the SQL script:
+Set the MySQL connection values in `.env`. Create the database and sixteen tables
+(10 business tables plus 6 AI customer-service tables) by running the SQL script:
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u root -p < database/schema.sql
 ```
+
+For an existing installation, apply
+`database/migrations/20261023_create_ai_tables.sql` as the incremental migration.
+The AI knowledge-base vectors live in PostgreSQL 16 with the pgvector extension;
+apply `database/migrations/20261023_create_ai_vectors.sql`, or set
+`VECTOR_DB_AUTO_MIGRATE=true` in development to create the extension, table and
+HNSW index on startup.
 
 For local development, `DB_SYNCHRONIZE=true` lets TypeORM synchronize entity
 changes on startup. Use `DB_SYNCHRONIZE=false` in production and apply reviewed
@@ -47,6 +54,43 @@ SQL migrations instead. The `admin_settings` table is included in
 `DB_SYNCHRONIZE=false`, apply
 `database/migrations/20261020_create_admin_settings.sql`. Never expose a
 production database to the public network or use the example credentials there.
+
+### Applying migrations to an existing environment
+
+`database/schema.sql` is only for a fresh database. For an existing test or
+production database, apply the files under `database/migrations/` in filename
+order against the database named by `DB_DATABASE`. The helper script uses a
+local `mysql` client when available and falls back to the `mysql:8.0` Docker
+image:
+
+```bash
+DB_HOST=<host> DB_PORT=3306 DB_USERNAME=<user> DB_PASSWORD=<password> \
+  DB_DATABASE=novel_platform \
+  ./database/scripts/apply-mysql-migration.sh \
+  database/migrations/20261024_disable_idle_auto_transfer.sql
+```
+
+Before running the optional data cleanup, back up `ai_conversations`,
+`ai_messages` and `ai_settings`. When MySQL runs in a container on the same
+server, point the script at the container instead of publishing its port:
+
+```bash
+DB_CONTAINER=mysql DB_USERNAME=root DB_PASSWORD=<password> \
+  DB_DATABASE=novel_platform \
+  ./database/scripts/apply-mysql-migration.sh \
+  database/migrations/20261024_disable_idle_auto_transfer.sql
+```
+
+When MySQL runs inside Kubernetes, pipe the same file through the pod instead:
+
+```bash
+kubectl exec -i -n <namespace> deploy/mysql -- \
+  mysql -uroot -p"$DB_PASSWORD" novel_platform \
+  < database/migrations/20261024_disable_idle_auto_transfer.sql
+```
+
+All migration files are written to be re-runnable (`CREATE TABLE IF NOT EXISTS`,
+`DELETE` / `UPDATE` scoped by old markers).
 
 ## Compile and run the project
 
@@ -116,6 +160,40 @@ All routes require an admin JWT:
 - `POST /api/admin/upload` accepts a multipart `file` field containing a JPG,
   PNG, WebP, or GIF image up to 5 MB. The returned URL can be fetched at
   `/api/admin/uploads/:filename`.
+
+## AI customer service API
+
+The AI module exposes the H5 endpoints under `/api/ai` (user JWT required) and
+the management endpoints under `/api/admin/ai` (admin JWT required). Responses
+follow the standard `{ code, message, data }` envelope, except
+`POST /api/ai/chat`, which is an SSE stream (`message` / `done` / `transfer` /
+`error` events).
+
+LLM and embedding providers are pluggable: `ai_settings.llmProvider` (or the
+`LLM_PROVIDER` environment variable when the setting is not persisted yet)
+selects `openai`, `doubao` or `zhipu`. All providers use the OpenAI-compatible
+Chat Completions and Embeddings protocol, so only the API base, key and model
+need to change:
+
+- `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`
+- `OPENAI_API_BASE` / `DOUBAO_API_BASE` / `ZHIPU_API_BASE`
+- `OPENAI_API_KEY` / `DOUBAO_API_KEY` / `ZHIPU_API_KEY`
+- `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_API_BASE`
+- `LLM_TIMEOUT_MS` (default 30000) and `EMBEDDING_TIMEOUT_MS` (default 10000)
+
+`SENSITIVE_WORDS` accepts a comma/semicolon/whitespace separated word list that
+is shared by comments and AI chat; leave it empty to disable word matching.
+
+`AI_API_BASE` is a universal override for both chat and embeddings. Chat
+requests are rate limited per user through `@RateLimit` + Redis using
+`ai_settings.rateLimitPerMinute` (default 10 per minute); admin knowledge tests
+are limited to 20 per minute. Persisted AI settings are cached for five seconds
+and refreshed immediately after `PUT /api/admin/ai/settings`.
+
+Knowledge documents support TXT, Markdown, PDF and DOCX uploads (maximum 10 MB)
+as well as manual text and HTTPS web pages. Parsing runs in the Bull queue
+(`ai-knowledge`), chunks the text, writes embeddings to pgvector, and records
+`status` / `failReason` for the admin UI.
 
 ## Run tests
 

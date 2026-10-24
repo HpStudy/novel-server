@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { SensitiveWordService } from '../../common/sensitive-word.service';
 import { Comment } from '../../entities/comment.entity';
 
 @Injectable()
@@ -8,13 +9,21 @@ export class CommentService {
   constructor(
     @InjectRepository(Comment)
     private readonly commentRepository: Repository<Comment>,
+    private readonly sensitiveWords: SensitiveWordService,
   ) {}
 
   async findByBookId(bookId: number) {
-    return this.commentRepository.find({ where: { bookId, status: 1 }, order: { createdAt: 'DESC' } });
+    return this.commentRepository.find({
+      where: { bookId, status: 1 },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async addComment(userId: number, dto: { bookId: number; chapterId?: number; content: string }) {
+  async addComment(
+    userId: number,
+    dto: { bookId: number; chapterId?: number; content: string },
+  ) {
+    this.sensitiveWords.assertClean(dto.content);
     const item = this.commentRepository.create({
       userId,
       bookId: dto.bookId,

@@ -23,10 +23,35 @@ import { Comment } from './entities/comment.entity';
 import { Order } from './entities/order.entity';
 import { Banner } from './entities/banner.entity';
 import { AdminSetting } from './entities/admin-setting.entity';
+import { BullModule } from '@nestjs/bull';
+import { ScheduleModule } from '@nestjs/schedule';
+import { RedisModule } from './common/redis.module';
+import { CommonModule } from './common/common.module';
+import { AiModule } from './modules/ai/ai.module';
+import { AiConversation } from './entities/ai/ai-conversation.entity';
+import { AiMessage } from './entities/ai/ai-message.entity';
+import { AiKnowledgeDoc } from './entities/ai/ai-knowledge-doc.entity';
+import { AiKnowledgeChunk } from './entities/ai/ai-knowledge-chunk.entity';
+import { AiFeedback } from './entities/ai/ai-feedback.entity';
+import { AiSetting } from './entities/ai/ai-setting.entity';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        redis: {
+          host: configService.get<string>('REDIS_HOST', '127.0.0.1'),
+          port: configService.get<number>('REDIS_PORT', 6379),
+          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+        },
+      }),
+    }),
+    ScheduleModule.forRoot(),
+    RedisModule,
+    CommonModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -38,8 +63,26 @@ import { AdminSetting } from './entities/admin-setting.entity';
         password: configService.get<string>('DB_PASSWORD', ''),
         database: configService.get<string>('DB_DATABASE', 'novel_platform'),
         charset: 'utf8mb4',
-        entities: [User, Book, Category, Chapter, Favorite, ReadHistory, Comment, Order, Banner, AdminSetting],
-        synchronize: configService.get<string>('DB_SYNCHRONIZE', 'true') === 'true',
+        entities: [
+          User,
+          Book,
+          Category,
+          Chapter,
+          Favorite,
+          ReadHistory,
+          Comment,
+          Order,
+          Banner,
+          AdminSetting,
+          AiConversation,
+          AiMessage,
+          AiKnowledgeDoc,
+          AiKnowledgeChunk,
+          AiFeedback,
+          AiSetting,
+        ],
+        synchronize:
+          configService.get<string>('DB_SYNCHRONIZE', 'true') === 'true',
         logging: configService.get<string>('DB_LOGGING', 'false') === 'true',
       }),
     }),
@@ -53,6 +96,7 @@ import { AdminSetting } from './entities/admin-setting.entity';
     OrderModule,
     BannerModule,
     AdminModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [AppService],

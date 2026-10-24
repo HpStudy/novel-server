@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Book } from '../../entities/book.entity';
 import { Chapter } from '../../entities/chapter.entity';
+import { RedisService } from '../../common/redis.service';
 
 @Injectable()
 export class BookService {
@@ -11,6 +12,7 @@ export class BookService {
     private readonly bookRepository: Repository<Book>,
     @InjectRepository(Chapter)
     private readonly chapterRepository: Repository<Chapter>,
+    private readonly redis: RedisService,
   ) {}
 
   async onModuleInit() {
@@ -101,9 +103,16 @@ export class BookService {
   }
 
   async findAll(query: { page?: number; limit?: number; categoryId?: number; sort?: string }) {
-    const page = Number(query.page ?? 1);
-    const limit = Number(query.limit ?? 10);
+    const page = Number.isInteger(query.page) && Number(query.page) > 0 ? Number(query.page) : 1;
+    const limit = Number.isInteger(query.limit) && Number(query.limit) > 0
+      ? Math.min(Number(query.limit), 100)
+      : 10;
     const categoryId = query.categoryId ? Number(query.categoryId) : undefined;
+    const cacheKey = `cache:books:list:${page}:${limit}:${categoryId ?? 'all'}:${query.sort ?? 'hot'}`;
+    const cached = await this.redis.get<{ items: Book[]; total: number; page: number; limit: number }>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const qb = this.bookRepository.createQueryBuilder('book');
     qb.where('book.status = :status', { status: 1 });
@@ -122,7 +131,9 @@ export class BookService {
 
     const [items, total] = await qb.take(limit).skip((page - 1) * limit).getManyAndCount();
 
-    return { items, total, page, limit };
+    const result = { items, total, page, limit };
+    await this.redis.set(cacheKey, result, 60);
+    return result;
   }
 
   async findOne(id: number) {
@@ -145,6 +156,17 @@ export class BookService {
   }
 
   async recommend() {
-    return this.bookRepository.find({ where: { status: 1 }, order: { readCount: 'DESC' }, take: 6 });
+    const key = 'cache:books:recommend';
+    const cached = await this.redis.get<Book[]>(key);
+    if (cached) {
+      return cached;
+    }
+    const books = await this.bookRepository.find({
+      where: { status: 1 },
+      order: { readCount: 'DESC' },
+      take: 6,
+    });
+    await this.redis.set(key, books, 60);
+    return books;
   }
 }

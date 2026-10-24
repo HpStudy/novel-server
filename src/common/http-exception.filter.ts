@@ -17,6 +17,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // SSE 等长连接可能已经写出响应头/数据（例如限流守卫直接下发 error 事件），
+    // 此时不能再写 JSON，否则会出现 "headers already sent"。
+    if (response.headersSent) {
+      if (!response.writableEnded) {
+        response.end();
+      }
+      return;
+    }
+
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
@@ -25,11 +34,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const message =
       exception instanceof HttpException
         ? exception.getResponse() instanceof Object
-          ? (exception.getResponse() as any).message ?? exception.message
+          ? ((exception.getResponse() as any).message ?? exception.message)
           : exception.message
         : 'Internal server error';
 
-    this.logger.error(`${request.method} ${request.url}`, exception instanceof Error ? exception.stack : undefined);
+    this.logger.error(
+      `${request.method} ${request.url}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
 
     response.status(status).json({
       code: status,

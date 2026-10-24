@@ -1,10 +1,15 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Book } from '../../entities/book.entity';
 import { Chapter } from '../../entities/chapter.entity';
 import { Order } from '../../entities/order.entity';
 import { User } from '../../entities/user.entity';
+import { RedisService } from '../../common/redis.service';
 
 @Injectable()
 export class ChapterService {
@@ -17,10 +22,16 @@ export class ChapterService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly redis: RedisService,
   ) {}
 
   async findListByBookId(bookId: number) {
-    return this.chapterRepository.find({
+    const cacheKey = `cache:chapters:list:${bookId}`;
+    const cached = await this.redis.get<Partial<Chapter>[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const chapters = await this.chapterRepository.find({
       where: { bookId, status: 1 },
       order: { chapterNum: 'ASC' },
       select: {
@@ -35,20 +46,28 @@ export class ChapterService {
         publishedAt: true,
       },
     });
+    await this.redis.set(cacheKey, chapters, 60);
+    return chapters;
   }
 
   async findContentById(id: number, user?: { id?: number }) {
-    const chapter = await this.chapterRepository.findOne({ where: { id, status: 1 } });
+    const chapter = await this.chapterRepository.findOne({
+      where: { id, status: 1 },
+    });
     if (!chapter) {
       throw new NotFoundException('章节不存在');
     }
 
-    const book = await this.bookRepository.findOne({ where: { id: chapter.bookId } });
+    const book = await this.bookRepository.findOne({
+      where: { id: chapter.bookId },
+    });
     if (!book) {
       throw new NotFoundException('书籍不存在');
     }
 
-    const isFree = chapter.isFree === 1 || (book.isVip === 0 && chapter.chapterNum <= book.freeChapters);
+    const isFree =
+      chapter.isFree === 1 ||
+      (book.isVip === 0 && chapter.chapterNum <= book.freeChapters);
     if (isFree) {
       return { chapter, book };
     }
