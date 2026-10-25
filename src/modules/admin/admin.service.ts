@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -395,8 +396,25 @@ export class AdminService {
     return { deleted: true };
   }
 
-  categories() {
-    return this.categoryRepository.find({ order: { sort: 'ASC', id: 'ASC' } });
+  async categories() {
+    const [categories, bookCounts] = await Promise.all([
+      this.categoryRepository.find({ order: { sort: 'ASC', id: 'ASC' } }),
+      this.bookRepository
+        .createQueryBuilder('book')
+        .select('book.categoryId', 'categoryId')
+        .addSelect('COUNT(book.id)', 'bookCount')
+        .groupBy('book.categoryId')
+        .getRawMany<{ categoryId: number; bookCount: string }>(),
+    ]);
+
+    const countMap = new Map(
+      bookCounts.map((row) => [Number(row.categoryId), Number(row.bookCount)]),
+    );
+
+    return categories.map((category) => ({
+      ...category,
+      bookCount: countMap.get(category.id) ?? 0,
+    }));
   }
 
   async category(id: number) {
@@ -417,17 +435,45 @@ export class AdminService {
     return this.categoryRepository.save(category);
   }
 
-  async deleteCategory(id: number) {
+  async deleteCategory(id: number, reassignTo?: number) {
     const category = await this.category(id);
     const bookCount = await this.bookRepository.countBy({
       categoryId: category.id,
     });
+
     if (bookCount > 0) {
-      throw new ConflictException('该分类下仍有书籍，不能删除');
+      if (reassignTo === undefined) {
+        throw new ConflictException(
+          `该分类下还有 ${bookCount} 本书籍，请先转移或删除这些书籍后再删除分类`,
+        );
+      }
+      if (!Number.isInteger(reassignTo) || reassignTo <= 0) {
+        throw new BadRequestException('目标分类不正确');
+      }
+      if (reassignTo === category.id) {
+        throw new BadRequestException('不能将书籍转移到当前分类');
+      }
+      const target = await this.categoryRepository.findOneBy({
+        id: reassignTo,
+      });
+      if (!target) {
+        throw new NotFoundException('目标分类不存在');
+      }
+
+      await this.bookRepository.manager.transaction(async (manager) => {
+        await manager.update(
+          Book,
+          { categoryId: category.id },
+          { categoryId: reassignTo },
+        );
+        await manager.delete(Category, id);
+      });
+      await this.clearBookCaches();
+      return { deleted: true, reassignedBooks: bookCount };
     }
 
     await this.categoryRepository.delete(id);
-    return { deleted: true };
+    return { deleted: true, reassignedBooks: 0 };
   }
 
   private async ensureCategoryExists(categoryId?: number) {

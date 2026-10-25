@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -652,8 +653,14 @@ export class AdminController {
   ])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  deleteCategory(@Param('id', ParseIntPipe) id: number) {
-    return this.adminService.deleteCategory(id);
+  deleteCategory(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('reassignTo') reassignTo?: string,
+  ) {
+    return this.adminService.deleteCategory(
+      id,
+      reassignTo === undefined ? undefined : Number(reassignTo),
+    );
   }
 
   @Get(['banners', 'banner'])

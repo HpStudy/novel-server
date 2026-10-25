@@ -135,8 +135,10 @@ update, and delete:
 - Chapters: the same methods under `/api/admin/chapters`; chapter creation
   requires `bookId`, `chapterNum`, `title`, and `content`. Chapter changes
   recalculate the parent book's chapter and word counts.
-- Categories: the same methods under `/api/admin/categories`; a category with
-  books cannot be deleted.
+- Categories: the same methods under `/api/admin/categories`; list items include
+  `bookCount`. A category with books can be deleted by passing
+  `?reassignTo=<categoryId>` to move its books to another category first;
+  without `reassignTo` the API returns `409` with the current book count.
 
 The legacy action-style routes `/book/list`, `/book/create`,
 `/book/update/:id`, and `/book/delete/:id` are also accepted (and likewise for
