@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThanOrEqual, Repository } from 'typeorm';
+import { In, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { Book } from '../../entities/book.entity';
 import { User } from '../../entities/user.entity';
 import { Category } from '../../entities/category.entity';
@@ -326,6 +326,8 @@ export class AdminService {
       throw new NotFoundException('所属书籍不存在');
     }
 
+    await this.ensureChapterNumsAvailable(book.id, [Number(input.chapterNum)]);
+
     const chapter = await this.chapterRepository.save(
       this.chapterRepository.create(input),
     );
@@ -348,6 +350,11 @@ export class AdminService {
     if (!book) {
       throw new NotFoundException('所属书籍不存在');
     }
+
+    await this.ensureChapterNumsAvailable(
+      bookId,
+      chapters.map((chapter) => Number(chapter.chapterNum)),
+    );
 
     const savedChapters = await this.chapterRepository.manager.transaction(
       async (manager) => {
@@ -378,6 +385,12 @@ export class AdminService {
       throw new NotFoundException('所属书籍不存在');
     }
 
+    if (
+      input.chapterNum !== undefined &&
+      Number(input.chapterNum) !== Number(chapter.chapterNum)
+    ) {
+      await this.ensureChapterNumsAvailable(bookId, [Number(input.chapterNum)], id);
+    }
     this.chapterRepository.merge(chapter, input);
     const savedChapter = await this.chapterRepository.save(chapter);
     await this.refreshBookChapterStats(oldBookId);
@@ -486,6 +499,54 @@ export class AdminService {
     if (!exists) {
       throw new NotFoundException('分类不存在');
     }
+  }
+
+  /**
+   * 校验章节序号：同一本书下 chapter_num 唯一，
+   * 重复时返回明确提示，避免直接抛出 MySQL 唯一索引错误（500 Internal server error）。
+   */
+  private async ensureChapterNumsAvailable(
+    bookId: number,
+    chapterNums: number[],
+    excludeId?: number,
+  ) {
+    const nums = chapterNums
+      .map((num) => Number(num))
+      .filter((num) => Number.isFinite(num));
+    if (!nums.length) return;
+
+    const duplicatedInPayload = [
+      ...new Set(nums.filter((num, index) => nums.indexOf(num) !== index)),
+    ];
+    if (duplicatedInPayload.length) {
+      throw new BadRequestException(
+        `章节序号重复：${duplicatedInPayload.join('、')}，请修改后再提交`,
+      );
+    }
+
+    // 只查冲突序号，走 uq_chapters_book_num 索引，避免把整本书的章节读进内存
+    const conflicts = await this.chapterRepository.find({
+      where: {
+        bookId,
+        chapterNum: In(nums),
+        ...(excludeId === undefined ? {} : { id: Not(excludeId) }),
+      },
+      select: ['chapterNum'],
+    });
+    if (!conflicts.length) return;
+
+    const maxRow = await this.chapterRepository
+      .createQueryBuilder('chapter')
+      .select('COALESCE(MAX(chapter.chapterNum), 0)', 'maxChapterNum')
+      .where('chapter.bookId = :bookId', { bookId })
+      .getRawOne<{ maxChapterNum: number | string }>();
+    const maxChapterNum = Number(maxRow?.maxChapterNum ?? 0);
+
+    throw new BadRequestException(
+      `章节序号已存在：${[...new Set(conflicts.map((item) => Number(item.chapterNum)))]
+        .sort((a, b) => a - b)
+        .join('、')}，请调整章节序号后再提交（当前最大章节序号：${maxChapterNum}）`,
+    );
   }
 
   private async refreshBookChapterStats(bookId: number) {

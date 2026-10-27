@@ -124,3 +124,123 @@ describe('AdminService categories', () => {
     expect(result).toEqual({ deleted: true, reassignedBooks: 0 });
   });
 });
+
+describe('AdminService chapter number validation', () => {
+  const userRepository = {};
+  const bookRepository = { findOneBy: jest.fn(), update: jest.fn() };
+  const categoryRepository = {};
+  const bannerRepository = {};
+  const orderRepository = {};
+  const chapterRepository = {
+    find: jest.fn(),
+    findOneBy: jest.fn(),
+    countBy: jest.fn(),
+    createQueryBuilder: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+    merge: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+  const commentRepository = {};
+  const settingRepository = {};
+  const jwtService = {};
+  const redis = {
+    deleteByPrefix: jest.fn(),
+    delete: jest.fn(),
+  };
+
+  const service = new AdminService(
+    userRepository as Repository<User>,
+    bookRepository as unknown as Repository<Book>,
+    categoryRepository as Repository<Category>,
+    bannerRepository as Repository<Banner>,
+    orderRepository as Repository<Order>,
+    chapterRepository as unknown as Repository<Chapter>,
+    commentRepository as Repository<Comment>,
+    settingRepository as Repository<AdminSetting>,
+    jwtService as JwtService,
+    redis as never,
+  );
+
+  const mockChapterQueryBuilder = (maxChapterNum = 3, wordCount = 18) => {
+    const queryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ maxChapterNum, wordCount }),
+    };
+    chapterRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    return queryBuilder;
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    redis.deleteByPrefix.mockResolvedValue(undefined);
+    redis.delete.mockResolvedValue(undefined);
+  });
+
+  it('rejects a chapter number that already exists in the same book', async () => {
+    bookRepository.findOneBy.mockResolvedValue({ id: 54 });
+    chapterRepository.find.mockResolvedValue([{ chapterNum: 1 }]);
+    mockChapterQueryBuilder(3);
+
+    await expect(
+      service.createChapter({
+        bookId: 54,
+        chapterNum: 1,
+        title: '重复章节',
+        content: '正文',
+      }),
+    ).rejects.toThrow(
+      '章节序号已存在：1，请调整章节序号后再提交（当前最大章节序号：3）',
+    );
+    expect(chapterRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicated chapter numbers inside one batch payload', async () => {
+    bookRepository.findOneBy.mockResolvedValue({ id: 54 });
+
+    await expect(
+      service.createChaptersBatch(54, 1, [
+        { chapterNum: 9, title: '第九章', content: '内容一' },
+        { chapterNum: 9, title: '第九章', content: '内容二' },
+      ]),
+    ).rejects.toThrow('章节序号重复：9，请修改后再提交');
+    expect(chapterRepository.find).not.toHaveBeenCalled();
+    expect(chapterRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('excludes the chapter being updated from the conflict check', async () => {
+    chapterRepository.findOneBy.mockResolvedValue({
+      id: 55,
+      bookId: 54,
+      chapterNum: 3,
+      title: '第三章',
+      content: '正文',
+      wordCount: 6,
+      isFree: 1,
+    });
+    bookRepository.findOneBy.mockResolvedValue({ id: 54 });
+    chapterRepository.find.mockResolvedValue([]);
+    chapterRepository.countBy.mockResolvedValue(3);
+    chapterRepository.merge.mockImplementation((target, input) =>
+      Object.assign(target, input),
+    );
+    chapterRepository.save.mockImplementation(async (chapter) => chapter);
+    mockChapterQueryBuilder(7);
+
+    const result = await service.updateChapter(55, {
+      chapterNum: 7,
+      title: '第七章',
+    });
+
+    expect(result.chapterNum).toBe(7);
+    const where = chapterRepository.find.mock.calls[0][0].where;
+    expect(where.bookId).toBe(54);
+    expect(where.chapterNum.type).toBe('in');
+    expect(where.chapterNum.value).toEqual([7]);
+    expect(where.id.type).toBe('not');
+    expect(where.id.value).toBe(55);
+  });
+});
